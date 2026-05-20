@@ -1,0 +1,480 @@
+---
+title: "research-day-2026"
+output: html_document
+date: "2026-04-10"
+---
+      ~ Research Day 2026! ~
+
+1) LIBRARIES, FILES, POSTER DATAFRAME! 
+```{r setup, include=TRUE}
+
+### LIBRARIES USED ###
+library(dplyr)
+library(tidyr)
+library(ggcorrplot)
+library(lubridate)
+library(mgcv)
+library(purrr)
+library(insight)
+library(patchwork)
+library(dominanceanalysis)
+library(LNCDR)
+library(lme4)
+library(lmerTest)
+library(partR2)
+library(tidyverse)
+library(ggplot2)
+library(gratia)
+library(tibble)
+library(MetBrewer) # pretty colors 
+library(ggplotify)
+
+setwd("/Users/angelamartinez/Desktop/PROJECTS/HPC MYELIN") #
+whoqol_myelin_day <- read.csv("whoqol_myelin_day.csv")
+whoqol_items <- read.csv("whoqol_items.csv")
+dts_df <- read.csv("dts_df_am (1).csv")
+
+# RENAME #
+whoqol_items <- whoqol_items %>% rename(mprage.sesno = mp2rage.session_number)
+
+research.2026 <- whoqol_myelin_day %>% left_join(whoqol_items %>% select(lunaid, mprage.sesno, whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25), by = c("lunaid", "mprage.sesno")) 
+
+# REMOVING N/As AND DUPLICATES #
+# research.2026 <- research.2026 %>% filter(!if_all(c(q1_overall, q2_health, D1_physical, D2_psych, D3_social, D4_env, whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25),is.na))
+
+research.2026 <- research.2026 %>% filter(!if_all(c(q1_overall, q2_health, D1_physical, D2_psych, D3_social, D4_env),is.na))
+
+research.2026 <- research.2026 %>% distinct(lunaid, mprage.sesno, .keep_all = TRUE) %>% tidyr::fill(ADI_NATRANK, .direction = "downup")
+
+# TOTAL SAMPLE #
+research.2026.distribution <- research.2026 %>% count(mprage.sesno, name = "n_subs")
+
+## RESEARCH.2026 SUMMARY ##
+# 1 -- 140
+# 2 -- 64
+# 3 -- 20
+
+```
+
+FOR CONTEXT: IS SUBJECTIVE AND OBJECTIVE ENVIRONMENT CAPUTRING SIMILAR OR DIFFERENT THINGS? 
+```{r message=FALSE, warning=FALSE}
+### WHOQOL-ENV IS COMPLEMENTARY TO ADI USING LINEAR MIXED MODEL ###
+lmixed <- lmer(D4_env ~ ADI_NATRANK + age + sex + (1 | lunaid), data = research.2026)
+summary(lmixed)
+
+### CALCULATE THE STRENGTH USING PARTIAL R SQUARED ###
+  # how much variance in whoqol is explained by ADI ? #
+  # R2_TYPE DIFFERENCES #
+    # NOTE: marginal parses through random effects WHILE conditional includes variance explained by random effect #
+partialR <- partR2(lmixed, partvars = c("age", "sex", "ADI_NATRANK"), data = research.2026, R2_type = "marginal")
+partialR
+# OUTPUT: 4.5%, however, supports idea that significantly related but capturing different things #
+
+### DOMINANCE ANALYSIS - ADI AS A PREDICTOR ### -- WHICH QUESTIONS ARE DRIVING THE RELATIONSHIP WHOQOL & ADI ENV ??
+env_items_df <- research.2026 %>% rename(
+    Safety = whoqol8,
+    Physical_Environment = whoqol9,
+    Financial_Resources = whoqol12,
+    Information_Available = whoqol13,
+    Leisure_Opportunities = whoqol14,
+    Home_Environment = whoqol23,
+    Health_Services = whoqol24,
+    Transport = whoqol25)
+
+EnvADI.DA.model <- lm(ADI_NATRANK ~ D4_env + Safety + Physical_Environment + Financial_Resources + Information_Available + Leisure_Opportunities + Home_Environment + Health_Services + Transport, data = env_items_df)
+
+EnvADI.DA <- dominanceAnalysis(EnvADI.DA.model)
+# summary(EnvADI.DA)
+
+plot(EnvADI.DA)
+plot(EnvADI.DA) + coord_flip() 
+
+### Financial_Resources -- item 12 -- has the most weight out of environmental domain ###
+```
+
+AIM 1: DEVELOPMENTAL TRAJECTOIES OF MYELINATION - SIMILAR TO DANS 2025 AND ETC. 
+```{r}
+# COMPUTING AVERAGES #
+research.2026$hipp_head_R1_avg  <- (research.2026$lh_head_R1 + research.2026$rh_head_R1) / 2
+research.2026$hipp_body_R1_avg  <- (research.2026$lh_body_R1 + research.2026$rh_body_R1) / 2
+research.2026$hipp_tail_R1_avg  <- (research.2026$lh_tail_R1 + research.2026$rh_tail_R1) / 2
+research.2026$hipp_whole_R1_avg <- (research.2026$lh_hippocampus_R1 + research.2026$rh_hippocampus_R1) / 2
+
+### AGE ON HPC ###
+# WHOLE #
+ageWHOLEHPC <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(ageWHOLEHPC)
+
+# RIGHT HEM #
+ageRIGHTHEM <- gam(rh_hippocampus_R1 ~ s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(ageRIGHTHEM)
+
+# LEFT HEM #
+ageLEFTHEM <- gam(lh_hippocampus_R1 ~ s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(ageLEFTHEM)
+
+
+
+
+```
+
+AIM 2: ARE WHOQOL AND ADI RELATED TO HPC R1 INDEPENDENTLY? 
+```{r message=FALSE, warning=FALSE}
+
+### ADI PREDICTING R1 WHOLE HPC ###  
+# WHOLE HPC #
+adigam <- gam(hipp_whole_R1_avg ~ ADI_NATRANK + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(adigam)
+
+# RIGHT HEM #
+adigam.rh <- gam(rh_hippocampus_R1 ~ ADI_NATRANK + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(adigam.rh)
+
+# LEFT HEM #
+adigam.lh <- gam(lh_hippocampus_R1 ~ ADI_NATRANK + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(adigam.lh)
+
+### WHOQOL-ENV PREDICTING R1 HPC ### 
+# WHOLE #
+whoqolgam <- gam(hipp_whole_R1_avg ~ D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolgam)
+
+# RIGHT HEM #
+whoqolgam.rh <- gam(rh_hippocampus_R1 ~ D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolgam.rh)
+
+# LEFT HEM #
+whoqolgam.lh <- gam(lh_hippocampus_R1 ~ D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolgam.lh)
+
+### Financial Resources (ITEM 12) PREDICTING R1 WHOLE HPC ###
+# WHOLE #
+FRgam <- gam(hipp_whole_R1_avg ~ whoqol12 + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(FRgam)
+
+# RIGHT HEM #
+FRgam.rh <- gam(rh_hippocampus_R1 ~ whoqol12 + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(FRgam.rh)
+
+# LEFT HEM #
+FRgam.lh <- gam(lh_hippocampus_R1 ~ whoqol12 + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(FRgam.lh)
+
+
+```
+
+EXPLORATORY: DOES SUBJECTIVE WELL-BEING OF ENVIRONMENT MODERATE THE ASSOCIATION BETWEEN ADI & R1 ?
+```{r message=FALSE, warning=FALSE}
+### MODERATOR ### 
+# WHOLE #
+whoqolmod <- gam(hipp_whole_R1_avg ~ ADI_NATRANK*D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolmod)
+
+# RIGHT #
+whoqolmod.rh <- gam(rh_hippocampus_R1 ~ ADI_NATRANK*D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolmod.rh)
+
+# LEFT #
+whoqolmod.lh <- gam(lh_hippocampus_R1 ~ ADI_NATRANK*D4_env + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026)
+summary(whoqolmod.lh)
+
+```
+
+    ~ Distress Tolerance! ~
+NEW TOTAL SAMPLE -- ADDING DISTRESS TOLERANCE TO THE MIX AND CREATING A SEPARATE DATAFRAME 
+```{r message=FALSE, warning=FALSE}
+research.2026.DTS <- research.2026 %>% left_join(dts_df %>% select(lunaid, visitno, DTS_Tolerance:DTS_Total), by = c("lunaid", "visitno")) 
+
+research.2026.DTS <- research.2026.DTS %>% filter(!if_all(c(DTS_Tolerance, DTS_Absorb, DTS_Appraise, DTS_Regulate, DTS_Total),is.na))
+
+research.2026.DTS <- research.2026.DTS %>% distinct(lunaid, visitno, .keep_all = TRUE)
+
+# TOTAL SAMPLE #
+research.2026.DTS.distribution <- research.2026.DTS %>% count(visitno, name = "n_subs")
+
+## RESEARCH.2026.DTS SUMMARY ##
+# 1 -- 118
+# 2 -- 60
+# 3 -- 30
+
+```
+
+NEXT QUESTIONS: DOES LOW TOLERANCE TO STRESS IMPACT INDIVIDUAL'S PERCEIVED QUALITY OF THEIR ENVIRONMENT? HOW DOES THIS IMPACT RELATIONSHIP TO R1? 
+
+EXPLORATORY: DISTRESS TOLERANCE -- A PSYCHOLOGICAL CONSTRUCT THAT TAPS INTO ADAPTABILITY
+DOES DT MODERATE THE ASSOCIATION BETWEEN ADI / WHOQOL-ENV & R1, RESPECTIVELY? 
+```{r message=FALSE, warning=FALSE}
+
+### DOMINANCE ANALYSIS -- DTS_APPRAISE SHOWED MOST VARIANCE ###
+EnvDTS.DA.model <- lm(D4_env ~ DTS_Total + DTS_Absorb + DTS_Appraise + DTS_Tolerance + DTS_Regulate, data = research.2026.DTS)
+EnvDTS.DA <- dominanceAnalysis(EnvDTS.DA.model)
+# summary(EnvDTS.DA)
+plot(EnvDTS.DA)
+plot(EnvDTS.DA) + coord_flip() 
+
+### DTS --> WHOQOL ENV ###
+dtswhoqol <- gam(D4_env ~ DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026.DTS)
+summary(dtswhoqol)
+
+### LOWER VS HIGHER DTS SCORES ###
+# Range for Total: 3 - 18 #
+# cut off point: 8 #
+### NOTE: higher scores means lower distress Tolerance ###
+low <- research.2026.DTS %>% filter(DTS_Total >= 8)
+high <- research.2026.DTS %>% filter(DTS_Total <= 8)
+
+### AREA DEPRIVATION INDEX -- FINDINGS FOR RESEARCH DAY POSTER ###
+# WHOLE #
+ADI.DTS.LOW.whole <- gam(hipp_whole_R1_avg ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ADI.DTS.LOW.whole)
+
+ADI.DTS.HIGH.whole <- gam(hipp_whole_R1_avg ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ADI.DTS.HIGH.whole)
+
+ADI.DTS.MODERATION <- gam(hipp_whole_R1_avg ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.MODERATION)
+
+### etc. ###
+# RIGHT #
+ADI.DTS.LOW.right <- gam(rh_hippocampus_R1 ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ADI.DTS.LOW.right)
+
+ADI.DTS.HIGH.right <- gam(rh_hippocampus_R1 ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ADI.DTS.HIGH.right)
+
+# LEFT #
+ADI.DTS.LOW.left <- gam(lh_hippocampus_R1 ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ADI.DTS.LOW.left)
+
+ADI.DTS.HIGH.left <- gam(lh_hippocampus_R1 ~ ADI_NATRANK*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ADI.DTS.HIGH.left)
+
+### D4 ENVIRONMENTAL DOMAIN ###
+# WHOLE #
+ENV.DTS.LOW.whole <- gam(hipp_whole_R1_avg ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ENV.DTS.LOW.whole)
+
+ENV.DTS.HIGH.whole <- gam(hipp_whole_R1_avg ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ENV.DTS.HIGH.whole)
+
+ENV.DTS.Moderation <- gam(hipp_whole_R1_avg ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = research.2026.DTS)
+summary(ENV.DTS.HIGH.whole)
+
+# RIGHT #
+ENV.DTS.LOW.right <- gam(rh_hippocampus_R1 ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ENV.DTS.LOW.right)
+
+ENV.DTS.HIGH.right <- gam(rh_hippocampus_R1 ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ENV.DTS.HIGH.right)
+
+# LEFT #
+ENV.DTS.LOW.left <- gam(lh_hippocampus_R1 ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = low)
+summary(ENV.DTS.LOW.left)
+
+ENV.DTS.HIGH.left <- gam(lh_hippocampus_R1 ~ D4_env*DTS_Total + s(age, k = 4) + sex + s(lunaid, bs = "re"), method = "REML", data = high)
+summary(ENV.DTS.HIGH.left)
+
+### HISTOGRAM: TOTAL DISTRESS TOLERANCE ACROSS AGE GROUPS ###
+dts_long2 <- research.2026.DTS %>%
+  select(lunaid, visitno, age, DTS_Total) %>%
+  pivot_longer(cols = DTS_Total, names_to = "Domain", values_to = "Score") %>%
+  mutate(age_group = cut(age,
+                         breaks = c(0, 16, 20, 24, 33), 
+                         labels = c("10-15", "16-19", "20-23", "24-32")))
+
+ggplot(dts_long2, aes(x = Score, fill = age_group)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  facet_wrap(~ Domain, scales = "free") +
+  labs(title = "DTS Total Scores by Age Group",
+       x = "Domain Total",
+       y = "Count") +
+  theme_minimal()
+        
+    
+### HISTOGRAM: DTS DOMAIN SCORES BY AGE GROUP ###
+dts_long <- research.2026.DTS %>%
+  select(lunaid, visitno, age, DTS_Tolerance:DTS_Total) %>%
+  pivot_longer(cols = DTS_Tolerance:DTS_Total, names_to = "Domain", values_to = "Score") %>%
+  mutate(age_group = cut(age,
+                         breaks = c(0, 16, 20, 24, 33), 
+                         labels = c("10-15", "16-19", "20-23", "24-32")))
+
+ggplot(dts_long, aes(x = Score, fill = age_group)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  facet_wrap(~ Domain, scales = "free") +
+  labs(title = "DTS Domain Scores by Age Group",
+       x = "Domain Score",
+       y = "Count") +
+  theme_minimal()
+
+### GREATER DISTRESS TOLERANCE IS HIGHLY CORRELATED TO PERCEIVED ENVIRONMENTLA QUALITY ###
+
+##### LOOKING AT ALL THE DOMAINS FOR OBJECTIVE AND PERCEIVED ENVIRONMENTAL #####
+# AREA DEPRIVATION INDEX #
+ADI.DTS.TOLERANCE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + ADI_NATRANK*DTS_Tolerance, method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.TOLERANCE)
+
+ADI.DTS.ABSORPTION <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + ADI_NATRANK*DTS_Absorb, method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.ABSORPTION)
+
+ADI.DTS.APPRAISE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + ADI_NATRANK*DTS_Appraise, method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.APPRAISE)
+
+ADI.DTS.REGULATE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + ADI_NATRANK*DTS_Regulate, method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.REGULATE)
+
+ADI.DTS.TOTAL <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + ADI_NATRANK*DTS_Total, method = "REML", data = research.2026.DTS)
+summary(ADI.DTS.TOTAL)
+
+# WHOQOL BREF #
+QOL.DTS.TOLERANCE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + D4_env*DTS_Tolerance, method = "REML", data = research.2026.DTS)
+summary(QOL.DTS.TOLERANCE)
+
+QOL.DTS.ABSORPTION <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + D4_env*DTS_Absorb, method = "REML", data = research.2026.DTS)
+summary(QOL.DTS.ABSORPTION)
+
+QOL.DTS.APPRAISE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + D4_env*DTS_Appraise, method = "REML", data = research.2026.DTS)
+summary(QOL.DTS.APPRAISE)
+
+QOL.DTS.REGULATE <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + D4_env*DTS_Regulate, method = "REML", data = research.2026.DTS)
+summary(QOL.DTS.REGULATE)
+
+QOL.DTS.TOTAL <- gam(hipp_whole_R1_avg ~ s(age, k = 4) + sex + s(lunaid, bs = "re") + D4_env*DTS_Total, method = "REML", data = research.2026.DTS)
+summary(QOL.DTS.TOTAL)
+
+#### CORRELATION TESTS FOR WHOQOL AND DTS ###
+cor.test(research.2026.DTS$D4_env, research.2026.DTS$DTS_Total)
+cor.test(research.2026.DTS$D4_env, research.2026.DTS$DTS_Tolerance)
+cor.test(research.2026.DTS$D4_env, research.2026.DTS$DTS_Absorb)
+cor.test(research.2026.DTS$D4_env, research.2026.DTS$DTS_Appraise)
+cor.test(research.2026.DTS$D4_env, research.2026.DTS$DTS_Regulate)
+
+```
+
+FINAL RESEARCH DAY FIGURES
+```{r}
+### COLOR PALETTE - RED WINE SUMMER VIBES #
+redwine <- c(
+  "#F4C3CF", #1
+  "#E9A8B6", #2
+  "#C45A67", #3
+  "#9A2E3A", #4
+  "#5A1A22"  #5
+)
+
+### GLOBAL THEME FOR CONSISTENCY ACROSS ALL FIGS ###
+theme_set(
+  theme_classic(base_size = 16, base_family = "Times New Roman") +
+    theme(
+      plot.title = element_text(face = "bold"),
+      axis.title = element_text(face = "bold")
+    ))
+
+### R1 INCREASES NON-LINEARLY WITHIN THE ADOLESCENT HIPPOCAMPUS ###
+# raw data visualization -- AIM 1: DEVELOPMENTAL #
+# WHOLE HIPP #
+ggplot(research.2026, aes(x = age, y = hipp_whole_R1_avg)) +
+  geom_point(alpha = 0.35, color = redwine[5]) +
+  geom_smooth(
+    method = "gam",
+    formula = y ~ s(x, k = 4),
+    color = redwine[5],
+    fill = redwine[5],
+    alpha = 0.2,
+    linewidth = 1.2
+  ) + labs(
+    title = "Whole Hippocampus", x = "Age (years)", y = "R1 value")
+
+# RIGHT HIPP #
+ggplot(research.2026, aes(age, rh_hippocampus_R1)) +
+  geom_point(alpha = 0.35, color = redwine[4]) +
+  geom_smooth(
+    method = "gam",
+    formula = y ~ s(x, k = 4),
+    color = redwine[4],
+    fill = redwine[4],
+    alpha = 0.2,
+    linewidth = 1.2
+  ) +
+  labs(title = "Right Hippocampus", x = "Age (years)", y = "R1 value")
+
+# LEFT HIPP #
+ggplot(research.2026, aes(age, lh_hippocampus_R1)) +
+  geom_point(alpha = 0.35, color = redwine[3]) +
+  geom_smooth(
+    method = "gam",
+    formula = y ~ s(x, k = 4),
+    color = redwine[3],
+    fill = redwine[3],
+    alpha = 0.2,
+    linewidth = 1.2
+  ) +
+  labs(title = "Left Hippocampus", x = "Age (years)", y = "R1 value")
+
+### AREA DEPRIVATION INDEX AND WHO QUALITY OF LIFE ENVIRONMENT MEASRES CAPTURE BOTH SHARED AND UNIQUE VARIANCES IN YOUTHS' ENVIRONMENT ###
+# contextualization #
+
+# WHOQOL-ENV distribution #
+p_env <- ggplot(research.2026, aes(D4_env)) +
+  geom_histogram(binwidth = 5, fill = redwine[4], color = "black", linewidth = 0.4) +
+  labs(x = "WHOQOL-ENV Score", y = "")
+p_env
+
+  
+# ADI distribution #
+p_adi <- ggplot(research.2026, aes(ADI_NATRANK)) +
+  geom_histogram(binwidth = 5, fill = redwine[3], color = "black", linewidth = 0.4) +
+  labs(x = "ADI Score", y = "Number of Participants")
+p_adi
+
+p_adi | p_env 
+
+# DOMINANCE ANALYSIS FIGURE CREATED OUTSIDE OF R (BARCHARTS) #
+
+### WHOQOL ENV and ADI CORRELATION GRAPH ###
+ggplot(research.2026, aes(ADI_NATRANK, D4_env)) +
+  geom_point(alpha = 0.5, color = redwine[4]) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  labs(x = "Area Deprivation Index", y = "WHOQOL-ENV")
+
+### GREATER ENVIRONMENTAL DEPRIVATION IS ASSOCIATED WITH LOWER HPC-R1 ###
+# Raw visualization of ADI -> HPC R1 #
+ggplot(research.2026, aes(ADI_NATRANK, hipp_whole_R1_avg)) +
+  geom_point(alpha = 0.5, color = redwine[3]) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  labs(x = "ADI Scores", y = "R1 value")
+
+# Raw visualization of WHOQOL-ENV -> HPC R1 #
+ggplot(research.2026, aes(D4_env, hipp_whole_R1_avg)) +
+  geom_point(alpha = 0.5, color = redwine[4]) +
+  geom_smooth(method = "lm", color = "black", se = TRUE) +
+  labs(x = "WHOQOL-ENV Scores", y = "R1 value")
+
+### DISTRESS TOLERANCE WAS ASSOCIATED WITH PERCEIVED ENVRIONMENTAL QUALITY BUT DOES NOT MODERATE ENVIRONMENT-R1 ASSOCIATION ###
+
+## TOLERANCE ##
+ggplot(research.2026.DTS, aes(DTS_Tolerance, D4_env)) +
+  geom_point(alpha = 0.8, color = redwine[2]) +
+  geom_smooth(method = "lm", se = TRUE, color = redwine[4], linewidth = 1.5) +
+  labs(x = "Tolerance Domain Score", y = "Perceived Environmental Quality")
+
+## APPRAISAL ##
+ggplot(research.2026.DTS, aes(DTS_Appraise, D4_env)) +
+  geom_point(alpha = 0.8, color = redwine[2]) +
+  geom_smooth(method = "lm", se = TRUE, color = redwine[4], linewidth = 1.5) +
+  labs(x = "Appraisal Domain Score", y = "Perceived Environmental Quality")
+
+## ABSORPTION ##
+ggplot(research.2026.DTS, aes(DTS_Absorb, D4_env)) +
+  geom_point(alpha = 0.8, color = redwine[2]) +
+  geom_smooth(method = "lm", se = TRUE, color = redwine[4], linewidth = 1.5) +
+  labs(x = "Absorption Domain Score", y = "Perceived Environmental Quality")
+
+## REGULATION ##
+ggplot(research.2026.DTS, aes(DTS_Regulate, D4_env)) +
+  geom_point(alpha = 0.8, color = redwine[2]) +
+  geom_smooth(method = "lm", se = TRUE, color = redwine[4], linewidth = 1.5) +
+  labs(x = "Regulation Domain Score", y = "Perceived Environmental Quality")
+
+```
+
